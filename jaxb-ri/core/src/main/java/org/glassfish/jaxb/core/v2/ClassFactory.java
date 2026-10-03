@@ -55,6 +55,15 @@ public final class ClassFactory {
                             logger.log(Level.FINE, e, () -> "Unable to make the constructor of "+clazz+" accessible");
                             throw e;
                         }
+                    } else {
+                        // Public constructor of a public class: the per-call access check of
+                        // Constructor.newInstance() can only succeed, so skip it when allowed.
+                        try {
+                            cons.setAccessible(true);
+                        } catch(RuntimeException e) {
+                            // not exported to this module: keep the regular per-call check
+                            logger.log(Level.FINE, e, () -> "Unable to suppress access checks on the constructor of "+clazz);
+                        }
                     }
                     return cons;
                 }

@@ -11,6 +11,7 @@
 
 package org.glassfish.jaxb.runtime.v2.runtime.reflect;
 
+import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -189,6 +190,29 @@ public abstract class Accessor<BeanT, ValueT> implements Receiver {
      */
     private static boolean accessWarned = false;
 
+    private static final Logger ACCESS_LOGGER = org.glassfish.jaxb.core.Utils.getClassLogger();
+
+    /**
+     * Turns off the language access check of a member that is already accessible.
+     *
+     * <p>
+     * {@link Field#get(Object)}, {@link Field#set(Object, Object)} and {@link Method#invoke(Object, Object...)}
+     * re-check access on every call unless the {@code accessible} flag is set, which costs a
+     * caller-class lookup per property and per bean. For a public member of a public class the
+     * check can only succeed, so setting the flag changes nothing but the cost. If the flag
+     * cannot be set (for example the package is not exported to this module), the member keeps
+     * the per-call check exactly as before.
+     */
+    static void suppressAccessChecks(AccessibleObject member) {
+        try {
+            member.setAccessible(true);
+        } catch (RuntimeException e) {
+            // InaccessibleObjectException or SecurityException: the public member keeps
+            // working through the regular per-call access check.
+            ACCESS_LOGGER.log(Level.FINE, e, () -> "Unable to suppress access checks on " + member);
+        }
+    }
+
 
     /**
      * {@link Accessor} that uses Java reflection to access a field.
@@ -223,6 +247,8 @@ public abstract class Accessor<BeanT, ValueT> implements Receiver {
                     }
                     accessWarned = true;
                 }
+            } else {
+                suppressAccessChecks(f);
             }
         }
 
@@ -305,6 +331,8 @@ public abstract class Accessor<BeanT, ValueT> implements Receiver {
                                 e);
                     accessWarned = true;
                 }
+            } else {
+                suppressAccessChecks(m);
             }
         }
 
