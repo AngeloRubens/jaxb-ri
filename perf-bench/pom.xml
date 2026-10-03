@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>bench</groupId>
+  <artifactId>jaxb-ri-bench</artifactId>
+  <version>1.0</version>
+  <packaging>jar</packaging>
+  <description>
+    A/B JMH benchmarks for jaxb-ri master vs feature branches, with Jackson XML as an external reference.
+    jaxb-core / jaxb-runtime are NOT on the classpath: every fork loads one variant from
+    variants/NAME/*.jar in an isolated class loader (see bench.Impl).
+  </description>
+  <properties>
+    <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <jmh.version>1.37</jmh.version>
+  </properties>
+  <dependencies>
+    <dependency><groupId>org.openjdk.jmh</groupId><artifactId>jmh-core</artifactId><version>${jmh.version}</version></dependency>
+    <dependency><groupId>jakarta.xml.bind</groupId><artifactId>jakarta.xml.bind-api</artifactId><version>4.1.0-M1</version></dependency>
+    <dependency><groupId>jakarta.activation</groupId><artifactId>jakarta.activation-api</artifactId><version>2.2.0-M2</version></dependency>
+    <dependency><groupId>org.eclipse.angus</groupId><artifactId>angus-activation</artifactId><version>2.0.3</version></dependency>
+    <dependency><groupId>com.sun.istack</groupId><artifactId>istack-commons-runtime</artifactId><version>4.2.0</version></dependency>
+    <dependency><groupId>org.glassfish.jaxb</groupId><artifactId>txw2</artifactId><version>4.1.0-SNAPSHOT</version></dependency>
+    <dependency><groupId>tools.jackson.dataformat</groupId><artifactId>jackson-dataformat-xml</artifactId><version>3.2.1</version></dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+        <configuration>
+          <annotationProcessorPaths>
+            <path><groupId>org.openjdk.jmh</groupId><artifactId>jmh-generator-annprocess</artifactId><version>${jmh.version}</version></path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
