@@ -41,7 +41,10 @@ import java.util.concurrent.TimeUnit;
  *       {@code sax-woodstox} = {@code unmarshal(InputStream)} with the system property
  *       {@code javax.xml.parsers.SAXParserFactory} pointing at Woodstox's SAX factory: the
  *       zero-code-change configuration, checked for the parser actually used and for DOCTYPE
- *       rejection before measuring.</li>
+ *       rejection before measuring.
+ *       {@code stax-secure} = {@code unmarshal(XMLStreamReader)} over Woodstox with DTD support and
+ *       external entities switched off, the configuration an application would have to use to keep
+ *       the protection JAXB applies to its own SAX parser.</li>
  * </ul>
  *
  * The setup verifies that the bound / written graph is identical across implementations, so no
@@ -102,8 +105,14 @@ public class BindingBenchmark {
             JAXBContext context = Impl.context(impl, type);
             if (parser.startsWith("sax")) securityCheck(context);
             unmarshaller = context.createUnmarshaller();
-            marshaller = context.createMarshaller();
             stax = new WstxInputFactory();
+            if ("stax-secure".equals(parser)) {
+                stax = new WstxInputFactory();
+                stax.setProperty(XMLInputFactory.SUPPORT_DTD, false);
+                stax.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
+            }
+            if (parser.startsWith("stax")) staxSecurityCheck(context);
+            marshaller = context.createMarshaller();
         }
         verify(reference);
     }
@@ -113,24 +122,48 @@ public class BindingBenchmark {
      * parser does under JAXB's secure-processing defaults. Printed, not asserted, so the
      * measurement still runs and the outcome is visible in the log.
      */
-    private void securityCheck(JAXBContext context) {
-        System.out.println("# sax factory " + parser + ": " + javax.xml.parsers.SAXParserFactory.newInstance().getClass().getName());
-        String[] probes = {
+    private static final String[] PROBES = {
             "<?xml version=\"1.0\"?><!DOCTYPE r [<!ENTITY x SYSTEM \"file:///etc/hostname\">]><r>&x;</r>",
             "<?xml version=\"1.0\"?><!DOCTYPE r [<!ENTITY a \"aaaaaaaaaa\"><!ENTITY b \"&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;\"><!ENTITY c \"&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;\">]><r>&c;</r>"};
-        String[] names = {"external-entity", "entity-expansion"};
-        for (int i = 0; i < probes.length; i++) {
+    private static final String[] PROBE_NAMES = {"external-entity", "entity-expansion"};
+
+    private interface Probe { Object read(byte[] document) throws Exception; }
+
+    private void report(Probe probe) {
+        for (int i = 0; i < PROBES.length; i++) {
             String outcome;
             try {
-                context.createUnmarshaller().unmarshal(new ByteArrayInputStream(probes[i].getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-                outcome = "ACCEPTED";
+                Object value = probe.read(PROBES[i].getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                outcome = "ACCEPTED (" + value + ")";
             } catch (Throwable failure) {
                 Throwable root = failure;
                 while (root.getCause() != null && root.getCause() != root) root = root.getCause();
                 outcome = "rejected (" + root.getClass().getSimpleName() + ": " + String.valueOf(root.getMessage()).replace('\n', ' ') + ")";
             }
-            System.out.println("# security " + parser + " " + names[i] + ": " + outcome);
+            System.out.println("# security " + parser + " " + PROBE_NAMES[i] + ": " + outcome);
         }
+    }
+
+    private void securityCheck(JAXBContext context) {
+        System.out.println("# sax factory " + parser + ": " + javax.xml.parsers.SAXParserFactory.newInstance().getClass().getName());
+        report(document -> context.createUnmarshaller().unmarshal(new ByteArrayInputStream(document)));
+    }
+
+    /**
+     * The probe documents have a root the model does not know, so JAXB would reject them either way;
+     * for StAX the parser itself is checked instead: an expanded entity shows up as element text.
+     */
+    private void staxSecurityCheck(JAXBContext context) {
+        report(document -> {
+            XMLStreamReader reader = stax.createXMLStreamReader(new ByteArrayInputStream(document));
+            StringBuilder text = new StringBuilder();
+            try {
+                while (reader.hasNext())
+                    if (reader.next() == javax.xml.stream.XMLStreamConstants.CHARACTERS) text.append(reader.getText());
+            } finally { reader.close(); }
+            if (text.length() == 0) throw new IllegalStateException("entity not expanded");
+            return text.length() + " characters of entity text";
+        });
     }
 
     private void verify(JAXBContext reference) throws Exception {
@@ -150,7 +183,7 @@ public class BindingBenchmark {
     private Object run() throws Exception {
         if ("unmarshal".equals(op)) {
             if (jackson != null) return jackson.readValue(xml, type);
-            if ("stax".equals(parser)) {
+            if (parser.startsWith("stax")) {
                 XMLStreamReader reader = stax.createXMLStreamReader(new ByteArrayInputStream(xml));
                 try {
                     return unmarshaller.unmarshal(reader);
