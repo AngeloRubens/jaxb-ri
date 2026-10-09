@@ -37,7 +37,11 @@ import java.util.concurrent.TimeUnit;
  *   <li>{@code parser}: for JAXB unmarshal, {@code sax} = {@code unmarshal(InputStream)} through the
  *       JDK's JAXP SAX parser (the JAXB default), {@code stax} = {@code unmarshal(XMLStreamReader)}
  *       over Woodstox, the StAX parser Jackson XML itself uses (and the CXF/JAX-WS path).
- *       Jackson always reads bytes with its own Woodstox stack.</li>
+ *       Jackson always reads bytes with its own Woodstox stack.
+ *       {@code sax-woodstox} = {@code unmarshal(InputStream)} with the system property
+ *       {@code javax.xml.parsers.SAXParserFactory} pointing at Woodstox's SAX factory: the
+ *       zero-code-change configuration, checked for the parser actually used and for DOCTYPE
+ *       rejection before measuring.</li>
  * </ul>
  *
  * The setup verifies that the bound / written graph is identical across implementations, so no
@@ -90,15 +94,43 @@ public class BindingBenchmark {
         System.out.println("# fixture " + fixture + " = " + xml.length + " bytes, impl=" + impl
                 + ", java=" + System.getProperty("java.version"));
 
+        if ("sax-woodstox".equals(parser))
+            System.setProperty("javax.xml.parsers.SAXParserFactory", "com.ctc.wstx.sax.WstxSAXParserFactory");
         if (Impl.isJackson(impl)) {
             jackson = new XmlMapper();
         } else {
             JAXBContext context = Impl.context(impl, type);
+            if (parser.startsWith("sax")) securityCheck(context);
             unmarshaller = context.createUnmarshaller();
             marshaller = context.createMarshaller();
             stax = new WstxInputFactory();
         }
         verify(reference);
+    }
+
+    /**
+     * Reports which SAX factory JAXB obtains and whether it still rejects a DOCTYPE, as the JDK
+     * parser does under JAXB's secure-processing defaults. Printed, not asserted, so the
+     * measurement still runs and the outcome is visible in the log.
+     */
+    private void securityCheck(JAXBContext context) {
+        System.out.println("# sax factory " + parser + ": " + javax.xml.parsers.SAXParserFactory.newInstance().getClass().getName());
+        String[] probes = {
+            "<?xml version=\"1.0\"?><!DOCTYPE r [<!ENTITY x SYSTEM \"file:///etc/hostname\">]><r>&x;</r>",
+            "<?xml version=\"1.0\"?><!DOCTYPE r [<!ENTITY a \"aaaaaaaaaa\"><!ENTITY b \"&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;\"><!ENTITY c \"&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;\">]><r>&c;</r>"};
+        String[] names = {"external-entity", "entity-expansion"};
+        for (int i = 0; i < probes.length; i++) {
+            String outcome;
+            try {
+                context.createUnmarshaller().unmarshal(new ByteArrayInputStream(probes[i].getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                outcome = "ACCEPTED";
+            } catch (Throwable failure) {
+                Throwable root = failure;
+                while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+                outcome = "rejected (" + root.getClass().getSimpleName() + ": " + String.valueOf(root.getMessage()).replace('\n', ' ') + ")";
+            }
+            System.out.println("# security " + parser + " " + names[i] + ": " + outcome);
+        }
     }
 
     private void verify(JAXBContext reference) throws Exception {
